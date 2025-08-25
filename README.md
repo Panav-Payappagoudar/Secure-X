@@ -1,6 +1,5 @@
 <h1 align="center" id="title">SecureX</h1>
 
-<p align="center"><img src="https://socialify.git.ci/Panav-Payappagoudar/SecureX/image?custom_language=React&amp;language=1&amp;name=1&amp;owner=1&amp;stargazers=1&amp;theme=Light" alt="project-image"></p>
 
 <p id="description">SecureX is an AI-integrated blockchain-powered document management dashboard built for secure transparent and intelligent file handling. The platform allows users to upload store and access documents via IPFS with blockchain-backed authenticity using smart contracts on the Sepolia testnet. It features MetaMask authentication a responsive dashboard and an AI chatbot (powered by LLMs) that enables users to interact with uploaded documents intelligently.</p>
 
