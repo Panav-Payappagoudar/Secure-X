@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # 🔐✨ SecureX
 
 <h1 align="center" id="title">SecureX</h1>
@@ -207,4 +206,3 @@ cd ../client npm run dev
 - Git & GitHub
 - Postman (API Testing)
 - Visual Studio Code (IDE)
->>>>>>> 7916e8a1 (Initial commit)
