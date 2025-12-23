@@ -64,6 +64,13 @@ class RealIPFSService {
 
   // Upload to Web3.Storage (free service)
   async uploadToWeb3Storage(file, onProgress) {
+    // Check if we have API credentials
+    const apiKey = import.meta.env.VITE_WEB3_STORAGE_API_KEY;
+    
+    if (!apiKey) {
+      throw new Error('Web3.Storage API key not configured')
+    }
+    
     const formData = new FormData()
     formData.append('file', file)
 
@@ -101,23 +108,87 @@ class RealIPFSService {
         reject(new Error('Network error during Web3.Storage upload'))
       })
 
-      // Note: This endpoint requires an API key in production
-      // For demo purposes, we'll simulate the upload
-      setTimeout(() => {
-        reject(new Error('Web3.Storage requires API key'))
-      }, 1000)
+      // Use the real Web3.Storage API
+      xhr.open('POST', 'https://api.web3.storage/upload')
+      xhr.setRequestHeader('Authorization', `Bearer ${apiKey}`)
+      xhr.send(formData)
     })
   }
 
   // Upload to NFT.Storage (free service)
   async uploadToNFTStorage(file, onProgress) {
-    // Similar implementation to Web3.Storage
-    // For now, simulate since it requires API key
-    throw new Error('NFT.Storage requires API key')
+    // Check if we have API credentials
+    const apiKey = import.meta.env.VITE_NFT_STORAGE_API_KEY;
+    
+    if (!apiKey) {
+      throw new Error('NFT.Storage API key not configured')
+    }
+    
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const xhr = new XMLHttpRequest()
+    
+    return new Promise((resolve, reject) => {
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable && onProgress) {
+          const progress = Math.round((e.loaded / e.total) * 100)
+          onProgress(progress)
+        }
+      })
+
+      xhr.addEventListener('load', () => {
+        if (xhr.status === 200) {
+          try {
+            const response = JSON.parse(xhr.responseText)
+            resolve({
+              success: true,
+              hash: response.value.cid || response.cid,
+              size: file.size,
+              name: file.name,
+              type: file.type,
+              gateway: 'nft.storage'
+            })
+          } catch (error) {
+            reject(new Error('Invalid response from NFT.Storage'))
+          }
+        } else {
+          reject(new Error(`NFT.Storage upload failed: ${xhr.statusText}`))
+        }
+      })
+
+      xhr.addEventListener('error', () => {
+        reject(new Error('Network error during NFT.Storage upload'))
+      })
+
+      // Use the real NFT.Storage API
+      xhr.open('POST', 'https://api.nft.storage/upload')
+      xhr.setRequestHeader('Authorization', `Bearer ${apiKey}`)
+      xhr.send(formData)
+    })
   }
 
   // Upload to local IPFS node
   async uploadToLocalIPFS(file, onProgress) {
+    // Check if local IPFS node is accessible
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+      
+      const statusResponse = await fetch('http://127.0.0.1:5001/api/v0/id', { 
+        method: 'POST', 
+        signal: controller.signal 
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!statusResponse.ok) {
+        throw new Error('Local IPFS node not responding')
+      }
+    } catch (error) {
+      throw new Error('Local IPFS node not accessible: ' + error.message)
+    }
+    
     const formData = new FormData()
     formData.append('file', file)
 
@@ -144,7 +215,7 @@ class RealIPFSService {
               gateway: 'local-ipfs'
             })
           } catch (error) {
-            reject(new Error('Invalid response from local IPFS'))
+            reject(new Error('Invalid response from local IPFS node'))
           }
         } else {
           reject(new Error(`Local IPFS upload failed: ${xhr.statusText}`))
@@ -152,7 +223,7 @@ class RealIPFSService {
       })
 
       xhr.addEventListener('error', () => {
-        reject(new Error('Local IPFS node not available'))
+        reject(new Error('Network error during local IPFS upload'))
       })
 
       xhr.open('POST', 'http://127.0.0.1:5001/api/v0/add')

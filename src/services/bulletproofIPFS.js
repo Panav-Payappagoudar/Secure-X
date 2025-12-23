@@ -33,14 +33,32 @@ class BulletproofIPFS {
     ]
   }
 
-  // BULLETPROOF view that NEVER fails - ALWAYS shows verification page
+  // BULLETPROOF view - Try real access first, fallback to verification page
   async viewFile(hash, fileName = 'document') {
-    console.log('🚀 BULLETPROOF VIEW (Verification Page):', hash, fileName)
+    console.log('🚀 BULLETPROOF VIEW:', hash, fileName)
 
-    // NEVER try to access IPFS network - always show verification page
-    // This prevents all 504 errors and network issues
+    // First, try to access the file directly
+    try {
+      // Import the enhanced IPFS service
+      const { default: ipfsService } = await import('./ipfsService.js')
+      
+      // Check if file is accessible
+      const accessResult = await ipfsService.checkIPFSAccess(hash)
+      if (accessResult.accessible) {
+        console.log('✅ File is accessible, showing direct access options')
+        // Show a page with direct access option
+        this.createDirectAccessPage(hash, fileName, accessResult.gateway)
+        return { success: true, method: 'direct-access-available' }
+      } else {
+        console.log('⚠️ File not accessible via direct methods')
+      }
+    } catch (error) {
+      console.warn('Direct access check failed:', error.message)
+    }
+
+    // Fallback to verification page if direct access isn't available
     this.createWorkingFallback(hash, fileName)
-    return { success: true, method: 'verification-page' }
+    return { success: true, method: 'verification-page-fallback' }
   }
 
   // Force open in new tab (handles popup blockers)
@@ -96,6 +114,56 @@ class BulletproofIPFS {
       flash++
       if (flash > 6) clearInterval(flashInterval)
     }, 200)
+  }
+
+  // Create direct access page with download option
+  createDirectAccessPage(hash, fileName, gateway) {
+    try {
+      // Create a notification with direct download option
+      const container = document.createElement('div')
+      container.style.position = 'fixed'
+      container.style.top = '80px'
+      container.style.right = '20px'
+      container.style.zIndex = '9998'
+      container.style.backgroundColor = 'rgba(0,0,0,0.9)'
+      container.style.padding = '20px'
+      container.style.borderRadius = '12px'
+      container.style.border = '1px solid #00ff88'
+      container.style.maxWidth = '300px'
+      container.style.fontFamily = 'Arial, sans-serif'
+      
+      container.innerHTML = `
+        <div style="color: #00ff88; font-weight: bold; margin-bottom: 10px;">
+          🚀 File Available
+        </div>
+        <div style="color: #fff; font-size: 12px; margin-bottom: 15px;">
+          ${fileName}
+        </div>
+        <div style="color: #aaa; font-size: 10px; margin-bottom: 15px;">
+          Gateway: ${gateway.split('//')[1].split('/')[0]}
+        </div>
+        <a href="${gateway}/${hash}" target="_blank" rel="noopener noreferrer"
+           style="display: block; background: #00ff88; color: #000; margin-bottom: 8px; text-decoration: none; padding: 10px; border-radius: 4px; text-align: center; font-size: 14px; font-weight: bold;">
+          ⬇️ Download Now
+        </a>
+        <button onclick="this.parentElement.remove()" 
+                style="width: 100%; background: #666; color: white; border: none; padding: 8px; border-radius: 4px; cursor: pointer; margin-top: 10px;">
+          ✕ Close
+        </button>
+      `
+      
+      document.body.appendChild(container)
+      
+      // Auto-remove after 30 seconds
+      setTimeout(() => {
+        if (document.body.contains(container)) {
+          document.body.removeChild(container)
+        }
+      }, 30000)
+      
+    } catch (error) {
+      console.log('Direct access page creation failed')
+    }
   }
 
   // Create download fallback
@@ -577,11 +645,39 @@ class BulletproofIPFS {
     `
   }
 
-  // Upload file (bulletproof implementation)
+  // Upload file (bulletproof implementation) - Try real IPFS first
   async uploadFile(file, progressCallback = null) {
     try {
       console.log('📤 BULLETPROOF UPLOAD:', file.name)
       
+      // Try real IPFS upload first
+      try {
+        const { default: realIpfsService } = await import('./realIpfsService.js')
+        
+        const result = await realIpfsService.uploadFile(file, progressCallback)
+        
+        if (result.success) {
+          console.log('✅ Real IPFS upload successful:', result.hash)
+          
+          // Store file locally for later access
+          await this.storeFileLocally(result.hash, file)
+          
+          return {
+            success: true,
+            hash: result.hash,
+            size: result.size || file.size,
+            type: result.type || file.type,
+            name: result.name || file.name,
+            timestamp: new Date().toISOString(),
+            gateway: result.gateway,
+            real: true
+          }
+        }
+      } catch (realIpfsError) {
+        console.warn('Real IPFS upload failed, falling back to simulation:', realIpfsError.message)
+      }
+      
+      // Fallback to simulated upload
       if (progressCallback) {
         // Smooth progress animation
         for (let i = 0; i <= 100; i += 5) {
@@ -603,7 +699,8 @@ class BulletproofIPFS {
         type: file.type,
         name: file.name,
         timestamp: new Date().toISOString(),
-        bulletproof: true
+        bulletproof: true,
+        simulated: true
       }
       
     } catch (error) {
@@ -628,18 +725,24 @@ class BulletproofIPFS {
       const hashBuffer = await crypto.subtle.digest('SHA-256', content)
       const hashArray = Array.from(new Uint8Array(hashBuffer))
       
-      // Use known working hashes based on content
-      const workingHashes = [
-        'QmR7GSQM93Cx5eAg6a6yRzNde1FQv7uL6X1o4k7zrJa3Xx',
-        'QmYwAPJzv5CZsnAzt8auVkRJe2pYvKnVdx4nALwGbAx7B9',
-        'QmQPeNsJPyVWPFDVHb77w8G42Fvo15z4bG2X8D2GhfbSXc'
-      ]
+      // Convert SHA-256 hash to IPFS CID format (Qm prefix + base58 encoding simulation)
+      // For demo purposes, we'll create a unique hash based on actual file content
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
       
-      const index = (hashArray[0] + file.size) % workingHashes.length
-      return workingHashes[index]
+      // Take first 32 bytes (64 hex chars) and create a Qm hash
+      // This simulates a real IPFS hash but is unique per file content
+      let uniquePart = hashHex.substring(0, 32)
+      
+      // Pad to ensure we have enough characters
+      while (uniquePart.length < 44) {
+        uniquePart += '0123456789abcdef'[Math.floor(Math.random() * 16)]
+      }
+      
+      return `Qm${uniquePart.substring(0, 44)}`
       
     } catch (error) {
-      return 'QmR7GSQM93Cx5eAg6a6yRzNde1FQv7uL6X1o4k7zrJa3Xx'
+      // Fallback to timestamp-based hash for uniqueness
+      return `Qm${Date.now().toString(36)}${Math.random().toString(36).substring(2, 20)}`
     }
   }
 
@@ -666,9 +769,26 @@ class BulletproofIPFS {
     }
   }
 
-  // Download file (bulletproof)
+  // Download file (bulletproof) - Real download with fallback
   async downloadFile(hash, fileName = 'download') {
-    return this.viewFile(hash, fileName)
+    console.log('🚀 BULLETPROOF DOWNLOAD:', hash, fileName)
+    
+    // Try real download with fallback mechanism
+    try {
+      // Import the enhanced IPFS service
+      const { default: ipfsService } = await import('./ipfsService.js')
+      
+      // Attempt real download with gateway fallback
+      const result = await ipfsService.downloadFile(hash, fileName)
+      console.log('✅ Direct download successful:', result)
+      return result
+    } catch (error) {
+      console.warn('Direct download failed, falling back to verification page:', error.message)
+      
+      // Fallback to verification page if direct download fails
+      this.createWorkingFallback(hash, fileName)
+      return { success: true, method: 'verification-page-fallback' }
+    }
   }
 }
 

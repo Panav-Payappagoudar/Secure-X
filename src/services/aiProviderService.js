@@ -19,7 +19,7 @@ class AIProviderService {
       },
       google: {
         name: 'Google Gemini',
-        models: ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro'],
+        models: ['gemini-flash-latest', 'gemini-pro-latest', 'gemini-2.0-flash'],
         apiUrl: 'https://generativelanguage.googleapis.com/v1beta/models',
         requiresKey: true,
         multimodal: true,
@@ -117,9 +117,11 @@ class AIProviderService {
       }
     }
 
-    this.currentProvider = 'local'
-    this.currentModel = 'hackathon-ai-pro'
-    this.apiKeys = {}
+    this.currentProvider = 'google'
+    this.currentModel = 'gemini-flash-latest'
+    this.apiKeys = {
+      google: 'AIzaSyApFcLMVnjNMd62GfL1AWfDdT8-7HqKwI8'
+    }
   }
 
   setProvider(providerId, modelId = null) {
@@ -155,7 +157,8 @@ class AIProviderService {
     const provider = this.providers[this.currentProvider]
 
     // For hackathon reliability, prefer local AI for quota-sensitive providers
-    if (this.currentProvider === 'google' || this.currentProvider === 'openai') {
+    // But allow Google Gemini to be used if API key is provided
+    if (this.currentProvider === 'openai') {
       console.log(`🚀 Using local AI to avoid quota limits for ${provider.name}`)
       return await this.generateLocalResponse(prompt, context, options, {
         fallbackReason: `avoiding quota limits for reliable hackathon demo`,
@@ -302,7 +305,7 @@ class AIProviderService {
     if (!apiKey) throw new Error('Google API key required')
 
     // Use a working model as fallback
-    const model = this.currentModel === 'gemini-ultra' ? 'gemini-1.5-flash' : this.currentModel
+    const model = this.currentModel === 'gemini-ultra' ? 'gemini-flash-latest' : this.currentModel
 
     try {
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
@@ -1732,7 +1735,12 @@ What type of response would be most helpful for what you're trying to accomplish
     if (category === 'code') {
       const lines = content.split('\n').length
       const language = this.detectLanguage(fileName)
-      analysis += `**Code Analysis:**\n- Language: ${language}\n- Lines: ${lines}\n- Structure: Well-organized\n\n`
+      analysis += `**Code Analysis:**
+- Language: ${language}
+- Lines: ${lines}
+- Structure: Well-organized
+
+`
       analysis += `**Response to "${prompt}":**\nBased on the ${language} code analysis, `
 
       if (prompt.toLowerCase().includes('bug') || prompt.toLowerCase().includes('error')) {
@@ -1744,22 +1752,54 @@ What type of response would be most helpful for what you're trying to accomplish
       }
     } else if (category === 'document') {
       const words = content.split(/\s+/).length
-      analysis += `**Document Analysis:**\n- Type: ${this.detectDocType(fileName)}\n- Words: ~${words}\n- Quality: Professional\n\n`
+      analysis += `**Document Analysis:**
+- Type: ${this.detectDocType(fileName)}
+- Words: ~${words}
+- Quality: Professional
+
+`
       analysis += `**Response to "${prompt}":**\nBased on document analysis, the content provides comprehensive information with clear structure and valuable insights for practical application.`
     } else if (category === 'image') {
-      analysis += `**Image Analysis:**\n- File: ${fileName}\n- Type: Visual content\n- Quality: Professional\n\n`
+      analysis += `**Image Analysis:**
+- File: ${fileName}
+- Type: Visual content
+- Quality: Professional
+
+`
       analysis += `**Response to "${prompt}":**\nThe image contains well-composed visual elements with clear structure and professional presentation that effectively communicates its intended message.`
     } else if (category === 'data') {
       const lines = content.split('\n').length
-      analysis += `**Data Analysis:**\n- Format: ${this.detectDataFormat(fileName)}\n- Records: ~${lines}\n- Quality: High\n\n`
+      analysis += `**Data Analysis:**
+- Format: ${this.detectDataFormat(fileName)}
+- Records: ~${lines}
+- Quality: High
+
+`
       analysis += `**Response to "${prompt}":**\nThe dataset shows clear patterns with structured information that provides valuable insights for analysis and decision-making.`
     } else {
-      analysis += `**File Analysis:**\n- Type: ${category}\n- Size: ${content.length} characters\n- Structure: Well-organized\n\n`
+      analysis += `**File Analysis:**
+- Type: ${category}
+- Size: ${content.length} characters
+- Structure: Well-organized
+
+`
       analysis += `**Response to "${prompt}":**\nThe file contains structured information that addresses your question with comprehensive details and practical insights.`
     }
 
-    analysis += `\n\n**Key Insights:**\n- High-quality content with clear organization\n- Practical applications with real-world relevance\n- Comprehensive coverage of key concepts\n\n`
-    analysis += `**Recommendations:**\n1. Apply the insights to your specific use case\n2. Consider the context and practical applications\n3. Use this analysis for informed decision-making\n\n`
+    analysis += `
+
+**Key Insights:**
+- High-quality content with clear organization
+- Practical applications with real-world relevance
+- Comprehensive coverage of key concepts
+
+`
+    analysis += `**Recommendations:**
+1. Apply the insights to your specific use case
+2. Consider the context and practical applications
+3. Use this analysis for informed decision-making
+
+`
     analysis += `*Analysis powered by SecureX Hackathon AI - Always accurate, always helpful*`
 
     return analysis

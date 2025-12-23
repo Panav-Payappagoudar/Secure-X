@@ -23,8 +23,6 @@ import universalFileReader from '../services/universalFileReader'
 import aiProviderService from '../services/aiProviderService'
 import freeAIService from '../services/freeAIService'
 import ApiKeyConfig from '../components/ui/ApiKeyConfig'
-import documentProcessor from '../services/documentProcessor'
-import ragService from '../services/ragService'
 
 const AIDocumentChat = () => {
   const [selectedDocument, setSelectedDocument] = useState(null)
@@ -37,8 +35,6 @@ const AIDocumentChat = () => {
   const [showProviderSettings, setShowProviderSettings] = useState(false)
   const [showApiKeyConfig, setShowApiKeyConfig] = useState(false)
   const [currentProvider, setCurrentProvider] = useState(aiProviderService.getCurrentProvider())
-  const [processedDocuments, setProcessedDocuments] = useState(new Set())
-  const [isProcessingDocument, setIsProcessingDocument] = useState(false)
   const messagesEndRef = useRef(null)
   const fileInputRef = useRef(null)
   const { isConnected, address } = useWallet()
@@ -77,30 +73,33 @@ const AIDocumentChat = () => {
     if (!file) return
 
     setIsProcessingFile(true)
-    setIsProcessingDocument(true)
-    
     try {
-      // Process file through universal reader for display
       const result = await universalFileReader.readFile(file)
-      
+      console.log('File read result:', result); // Debug log
       if (result.success) {
-        setSelectedFile({
+        const fileData = {
           name: file.name,
           size: file.size,
           type: file.type,
           ...result
-        })
+        }
+        
+        setSelectedFile(fileData)
         setFileContent(result)
         
-        // Process document through RAG pipeline
-        const documentId = `doc_${Date.now()}`
-        await documentProcessor.processDocument(file, documentId)
+        // Store the actual content in localStorage so it can be accessed later
+        const fileWithContent = {
+          ...fileData,
+          content: result.readableText || result.content,
+          uploadDate: new Date().toISOString()
+        }
         
-        // Mark document as processed
-        setProcessedDocuments(prev => new Set([...prev, documentId]))
+        // Add to document context for global access
+        if (window.addTemporaryDocument) {
+          window.addTemporaryDocument(fileWithContent)
+        }
         
         toast.success(`📄 ${file.name} loaded successfully! ${result.fileType.category} file ready for AI analysis.`)
-        toast.success(`🤖 Document processed for RAG retrieval! Ready for contextual questions.`)
       } else {
         toast.error(`Failed to read ${file.name}: ${result.error}`)
       }
@@ -109,72 +108,14 @@ const AIDocumentChat = () => {
       toast.error('Error processing file. Please try again.')
     } finally {
       setIsProcessingFile(false)
-      setIsProcessingDocument(false)
     }
   }
 
   const generateAIResponse = async (userMessage, context) => {
     try {
-      // Check if we have processed documents for RAG
-      const hasProcessedDocuments = processedDocuments.size > 0;
-      
-      if (hasProcessedDocuments) {
-        // Use RAG-enhanced response
-        console.log('🤖 Using RAG-enhanced AI response');
-        
-        // Get document IDs for context
-        const contextDocumentIds = Array.from(processedDocuments);
-        
-        // Process query through RAG pipeline
-        const ragResult = await ragService.processQuery(userMessage, [
-          // In a real implementation, we would pass actual document objects
-          // For now, we'll pass IDs to simulate the behavior
-          ...contextDocumentIds.map(id => ({ id }))
-        ]);
-        
-        if (ragResult.success) {
-          // Use the augmented prompt with retrieved context
-          const ragContext = {
-            ...context,
-            ragPrompt: ragResult.augmentedPrompt,
-            retrievedChunks: ragResult.retrievedChunks
-          };
-          
-          // Try the selected AI provider with RAG context
-          try {
-            const response = await aiProviderService.generateResponse(
-              ragResult.augmentedPrompt, 
-              ragContext
-            );
-            return {
-              ...response,
-              ragEnhanced: true,
-              retrievedChunks: ragResult.retrievedChunks.length
-            };
-          } catch (providerError) {
-            console.warn('AI Provider failed, trying free service with RAG');
-            
-            // Fallback to free AI service with RAG context
-            const freeResponse = await freeAIService.generateResponse(
-              ragResult.augmentedPrompt, 
-              ragContext
-            );
-            
-            return {
-              ...freeResponse,
-              ragEnhanced: true,
-              retrievedChunks: ragResult.retrievedChunks.length
-            };
-          }
-        }
-      }
-      
-      // Fallback to original behavior if no RAG context
-      console.log('🤖 Using standard AI response');
-      
       // First try the selected AI provider
-      const response = await aiProviderService.generateResponse(userMessage, context);
-      return response;
+      const response = await aiProviderService.generateResponse(userMessage, context)
+      return response
     } catch (error) {
       console.error('AI Provider Error:', error)
 
@@ -245,17 +186,40 @@ The insights from this analysis can be applied to improve understanding and info
         context.fileName = selectedFile.name
         context.fileType = fileContent.fileType
         context.metadata = fileContent.metadata
+        
+        // Debug log
+        console.log('Sending file content to AI:', {
+          fileName: context.fileName,
+          fileType: context.fileType,
+          contentLength: context.fileContent?.length,
+          contentPreview: context.fileContent?.substring(0, 200)
+        });
       } else if (selectedDocument) {
         // For IPFS documents, try to get actual content instead of just metadata
         context.fileName = selectedDocument.fileName
         context.ipfsHash = selectedDocument.ipfsHash
         context.description = selectedDocument.description
 
-        // Generate realistic file content for analysis based on filename and description
-        context.fileContent = generateRealisticFileContent(selectedDocument.fileName, selectedDocument.description)
+        // Use actual file content if available, otherwise generate realistic content
+        if (selectedDocument.content) {
+          context.fileContent = selectedDocument.content
+        } else if (selectedDocument.readableText) {
+          context.fileContent = selectedDocument.readableText
+        } else {
+          // Generate realistic file content for analysis based on filename and description
+          context.fileContent = generateRealisticFileContent(selectedDocument.fileName, selectedDocument.description)
+        }
         context.fileType = { category: detectFileCategory(selectedDocument.fileName) }
         context.isIPFSDocument = true
         context.fullContent = generateFullFileContent(selectedDocument.fileName, selectedDocument.description)
+        
+        // Debug log
+        console.log('Sending IPFS document content to AI:', {
+          fileName: context.fileName,
+          fileType: context.fileType,
+          contentLength: context.fileContent?.length,
+          contentPreview: context.fileContent?.substring(0, 200)
+        });
       }
 
       const aiResponseData = await generateAIResponse(currentMessage, context)
@@ -570,12 +534,6 @@ Payment Methods: Credit Card (78%), PayPal (15%), Cash (7%)
     toast.info('Chat cleared')
   }
 
-  const clearProcessedDocuments = () => {
-    setProcessedDocuments(new Set())
-    documentProcessor.clearData()
-    toast.success('RAG data cleared')
-  }
-
   const copyToClipboard = async (text) => {
     try {
       const success = await safeCopyToClipboard(text, 'IPFS Hash')
@@ -845,14 +803,7 @@ Payment Methods: Credit Card (78%), PayPal (15%), Cash (7%)
                   <SparklesIcon className="w-5 h-5 text-gray-900" />
                 </div>
                 <div>
-                  <div className="flex items-center">
-                    <h3 className="text-white font-semibold">Universal AI Assistant</h3>
-                    {processedDocuments.size > 0 && (
-                      <span className="ml-2 px-2 py-0.5 bg-neon-green/20 text-neon-green text-xs rounded-full">
-                        RAG Enhanced
-                      </span>
-                    )}
-                  </div>
+                  <h3 className="text-white font-semibold">Universal AI Assistant</h3>
                   <p className="text-gray-400 text-sm">
                     {selectedFile ? `📄 File: ${selectedFile.name}` :
                      selectedDocument ? `📋 IPFS: ${selectedDocument.fileName}` :
@@ -860,7 +811,6 @@ Payment Methods: Credit Card (78%), PayPal (15%), Cash (7%)
                   </p>
                   <p className="text-xs text-neon-green mt-1">
                     Powered by {currentProvider.name}
-                    {processedDocuments.size > 0 && ' with RAG'}
                   </p>
                 </div>
               </div>
@@ -893,156 +843,3 @@ Payment Methods: Credit Card (78%), PayPal (15%), Cash (7%)
                         {selectedFile?.fileType?.category === 'code' && (
                           <>
                             <p>"Explain what this code does"</p>
-                            <p>"Find potential bugs or improvements"</p>
-                            <p>"Add comments to this code"</p>
-                          </>
-                        )}
-                        {selectedFile?.fileType?.category === 'image' && (
-                          <>
-                            <p>"Describe what you see in this image"</p>
-                            <p>"Analyze the composition and colors"</p>
-                            <p>"What text can you extract?"</p>
-                          </>
-                        )}
-                        {selectedFile?.fileType?.category === 'document' && (
-                          <>
-                            <p>"Summarize the main points"</p>
-                            <p>"Extract key information"</p>
-                            <p>"What are the conclusions?"</p>
-                          </>
-                        )}
-                        {!selectedFile?.fileType && (
-                          <>
-                            <p>"What is the main purpose of this file?"</p>
-                            <p>"Summarize the key content"</p>
-                            <p>"Analyze the structure and format"</p>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                messages.map((msg) => (
-                  <motion.div
-                    key={msg.id}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div className={`
-                      max-w-xs lg:max-w-2xl px-4 py-3 rounded-2xl
-                      ${msg.sender === 'user'
-                        ? 'bg-neon-green text-gray-900'
-                        : 'bg-white/10 text-white border border-white/20'
-                      }
-                    `}>
-                      {msg.sender === 'ai' && (
-                        <div className="flex items-center space-x-2 mb-2 flex-wrap">
-                          <SparklesIcon className="w-4 h-4 text-neon-green" />
-                          <span className="text-xs text-gray-400">
-                            {msg.provider || 'AI'} {msg.model && `(${msg.model})`}
-                          </span>
-                          {msg.document && (
-                            <span className="text-xs text-neon-green">• {msg.document}</span>
-                          )}
-                          {msg.fileType && (
-                            <span className="text-xs text-blue-400">• {msg.fileType}</span>
-                          )}
-                          {msg.ragEnhanced && (
-                            <span className="text-xs text-neon-green">
-                              • RAG Enhanced ({msg.retrievedChunks} chunks)
-                            </span>
-                          )}
-                          {msg.confidence && (
-                            <span className="text-xs text-yellow-400">
-                              • {Math.round(msg.confidence * 100)}% confidence
-                            </span>
-                          )}
-                        </div>
-                      )}
-                      <p className="text-sm lg:text-base">{msg.text}</p>
-                      <p className="text-xs opacity-70 mt-2">{msg.timestamp}</p>
-                    </div>
-                  </motion.div>
-                ))
-              )}
-              
-              {isTyping && (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="flex justify-start"
-                >
-                  <div className="bg-white/10 text-white border border-white/20 px-4 py-3 rounded-2xl">
-                    <div className="flex items-center space-x-2">
-                      <SparklesIcon className="w-4 h-4 text-neon-green animate-pulse" />
-                      <span className="text-sm">AI is analyzing the document...</span>
-                      <div className="flex space-x-1">
-                        <div className="w-2 h-2 bg-neon-green rounded-full animate-bounce"></div>
-                        <div className="w-2 h-2 bg-neon-green rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
-                        <div className="w-2 h-2 bg-neon-green rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Input */}
-            <div className="p-4 border-t border-white/10">
-              <div className="flex space-x-3">
-                <input
-                  type="text"
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-                  placeholder={selectedFile || selectedDocument ? "Ask me anything about your file..." : "Upload a file or select a document first"}
-                  disabled={(!selectedDocument && !selectedFile) || isTyping}
-                  className="flex-1 bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-neon-green transition-all duration-200 disabled:opacity-50"
-                />
-                <NeonButton
-                  onClick={sendMessage}
-                  disabled={(!selectedDocument && !selectedFile) || !message.trim() || isTyping}
-                  size="sm"
-                  className="px-4"
-                >
-                  <PaperAirplaneIcon className="w-5 h-5" />
-                </NeonButton>
-              </div>
-              
-              {processedDocuments.size > 0 && (
-                <div className="mt-2 flex justify-end">
-                  <button
-                    onClick={clearProcessedDocuments}
-                    className="text-xs text-gray-400 hover:text-neon-green transition-colors"
-                  >
-                    Clear RAG data
-                  </button>
-                </div>
-              )}
-              
-              {(selectedFile || selectedDocument) && (
-                <p className="text-xs text-gray-400 mt-2">
-                  💡 {currentProvider.name} will analyze "{selectedFile?.name || selectedDocument?.fileName}" to answer your questions
-                  {selectedFile?.fileType && (
-                    <span className="text-neon-green"> • {selectedFile.fileType.category} file detected</span>
-                  )}
-                </p>
-              )}
-            </div>
-          </GlassCard>
-        </div>
-      </div>
-
-      {/* API Key Configuration Modal */}
-      <ApiKeyConfig
-        isOpen={showApiKeyConfig}
-        onClose={() => setShowApiKeyConfig(false)}
-      />
-    </div>
-  )
-}
-
-export default AIDocumentChat

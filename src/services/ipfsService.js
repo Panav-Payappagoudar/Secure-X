@@ -116,76 +116,120 @@ class IPFSService {
     return IPFS_CONFIG.gateways.map(gateway => `${gateway}/${hash}`)
   }
 
-  // Download file from IPFS
+  // Download file from IPFS with gateway fallback
   async downloadFile(hash, fileName = 'download') {
-    try {
-      const url = this.getIPFSUrl(hash)
-      console.log('Downloading from IPFS:', url)
-      
-      const response = await fetch(url)
-      if (!response.ok) {
-        throw new Error(`Download failed: ${response.statusText}`)
+    console.log('Attempting to download from IPFS:', hash)
+    
+    // Try multiple gateways in order
+    for (let i = 0; i < IPFS_CONFIG.gateways.length; i++) {
+      try {
+        const gateway = IPFS_CONFIG.gateways[i]
+        const url = `${gateway}/${hash}`
+        console.log(`Trying gateway ${i + 1}/${IPFS_CONFIG.gateways.length}:`, url)
+        
+        const response = await fetch(url)
+        if (response.ok) {
+          const blob = await response.blob()
+          
+          // Create download link
+          const downloadUrl = window.URL.createObjectURL(blob)
+          const link = document.createElement('a')
+          link.href = downloadUrl
+          link.download = fileName
+          document.body.appendChild(link)
+          link.click()
+          document.body.removeChild(link)
+          window.URL.revokeObjectURL(downloadUrl)
+          
+          console.log('Successfully downloaded from:', gateway)
+          return {
+            success: true,
+            size: blob.size,
+            type: blob.type,
+            gateway: gateway
+          }
+        } else {
+          console.warn(`Gateway ${gateway} failed with status:`, response.status)
+        }
+      } catch (error) {
+        console.warn(`Gateway ${IPFS_CONFIG.gateways[i]} failed:`, error.message)
+        // Continue to next gateway
       }
-      
-      const blob = await response.blob()
-      
-      // Create download link
-      const downloadUrl = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = downloadUrl
-      link.download = fileName
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      window.URL.revokeObjectURL(downloadUrl)
-      
-      return {
-        success: true,
-        size: blob.size,
-        type: blob.type
-      }
-    } catch (error) {
-      console.error('IPFS download failed:', error)
-      throw new Error(`Download failed: ${error.message}`)
     }
+    
+    // If all gateways fail, throw error
+    console.error('All IPFS gateways failed for hash:', hash)
+    throw new Error(`Download failed: All IPFS gateways unavailable. Try again later or use a different gateway manually.`)
   }
 
-  // Check if IPFS hash is accessible
+  // Check if IPFS hash is accessible with gateway fallback
   async checkIPFSAccess(hash) {
-    try {
-      const url = this.getIPFSUrl(hash)
-      const response = await fetch(url, { method: 'HEAD' })
-      return response.ok
-    } catch (error) {
-      console.error('IPFS access check failed:', error)
-      return false
+    console.log('Checking IPFS access for hash:', hash)
+    
+    // Try multiple gateways in order
+    for (let i = 0; i < IPFS_CONFIG.gateways.length; i++) {
+      try {
+        const gateway = IPFS_CONFIG.gateways[i]
+        const url = `${gateway}/${hash}`
+        console.log(`Checking gateway ${i + 1}/${IPFS_CONFIG.gateways.length}:`, url)
+        
+        const response = await fetch(url, { method: 'HEAD' })
+        if (response.ok) {
+          console.log('Successfully accessed via gateway:', gateway)
+          return { accessible: true, gateway: gateway }
+        } else {
+          console.warn(`Gateway ${gateway} inaccessible with status:`, response.status)
+        }
+      } catch (error) {
+        console.warn(`Gateway ${IPFS_CONFIG.gateways[i]} check failed:`, error.message)
+        // Continue to next gateway
+      }
     }
+    
+    // If all gateways fail
+    console.log('All IPFS gateways inaccessible for hash:', hash)
+    return { accessible: false, error: 'All gateways unavailable' }
   }
 
-  // Get file metadata from IPFS
+  // Get file metadata from IPFS with gateway fallback
   async getFileMetadata(hash) {
-    try {
-      const url = this.getIPFSUrl(hash)
-      const response = await fetch(url, { method: 'HEAD' })
-      
-      if (!response.ok) {
-        throw new Error(`Failed to get metadata: ${response.statusText}`)
+    console.log('Getting file metadata from IPFS:', hash)
+    
+    // Try multiple gateways in order
+    for (let i = 0; i < IPFS_CONFIG.gateways.length; i++) {
+      try {
+        const gateway = IPFS_CONFIG.gateways[i]
+        const url = `${gateway}/${hash}`
+        console.log(`Getting metadata from gateway ${i + 1}/${IPFS_CONFIG.gateways.length}:`, url)
+        
+        const response = await fetch(url, { method: 'HEAD' })
+        
+        if (response.ok) {
+          console.log('Successfully got metadata from:', gateway)
+          return {
+            size: parseInt(response.headers.get('content-length') || '0'),
+            type: response.headers.get('content-type') || 'application/octet-stream',
+            lastModified: response.headers.get('last-modified'),
+            accessible: true,
+            gateway: gateway
+          }
+        } else {
+          console.warn(`Gateway ${gateway} failed to provide metadata with status:`, response.status)
+        }
+      } catch (error) {
+        console.warn(`Gateway ${IPFS_CONFIG.gateways[i]} metadata request failed:`, error.message)
+        // Continue to next gateway
       }
-      
-      return {
-        size: parseInt(response.headers.get('content-length') || '0'),
-        type: response.headers.get('content-type') || 'application/octet-stream',
-        lastModified: response.headers.get('last-modified'),
-        accessible: true
-      }
-    } catch (error) {
-      console.error('Error getting file metadata:', error)
-      return {
-        size: 0,
-        type: 'unknown',
-        lastModified: null,
-        accessible: false
-      }
+    }
+    
+    // If all gateways fail
+    console.log('All IPFS gateways failed to provide metadata for hash:', hash)
+    return {
+      size: 0,
+      type: 'unknown',
+      lastModified: null,
+      accessible: false,
+      error: 'All gateways unavailable'
     }
   }
 }
